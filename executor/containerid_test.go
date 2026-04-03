@@ -16,6 +16,9 @@ func TestValidContainerID(t *testing.T) {
 		{name: "dash", id: "abc-123", wantErr: true},
 		{name: "slash", id: "abc/123", wantErr: true},
 		{name: "underscore", id: "abc_123", wantErr: true},
+		{name: "dot", id: "abc.123", wantErr: true},
+		{name: "space", id: "abc 123", wantErr: true},
+		{name: "special", id: "abc$123", wantErr: true},
 	}
 
 	for _, tc := range tests {
