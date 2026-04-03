@@ -345,7 +345,7 @@ func (gs *gitSourceHandler) CacheKey(ctx context.Context, g session.Group, index
 
 	// TODO: should we assume that remote tag is immutable? add a timer?
 
-	buf, err := gitWithinDir(ctx, gitDir, "", sock, knownHosts, gs.auth, "ls-remote", "origin", ref)
+	buf, err := gitWithinDir(ctx, gitDir, "", sock, knownHosts, gs.auth, "ls-remote", "--", "origin", ref)
 	if err != nil {
 		return "", "", nil, false, errors.Wrapf(err, "failed to fetch remote %s", urlutil.RedactCredentials(remote))
 	}
@@ -427,7 +427,7 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 	doFetch := true
 	if isCommitSHA(ref) {
 		// skip fetch if commit already exists
-		if _, err := gitWithinDir(ctx, gitDir, "", sock, knownHosts, nil, "cat-file", "-e", ref+"^{commit}"); err == nil {
+		if _, err := gitWithinDir(ctx, gitDir, "", sock, knownHosts, nil, "cat-file", "-e", "--", ref+"^{commit}"); err == nil {
 			doFetch = false
 		}
 	}
@@ -446,7 +446,7 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 		}
 		args = append(args, "origin")
 		if !isCommitSHA(ref) {
-			args = append(args, "--force", ref+":tags/"+ref)
+			args = append(args, "--force", "--", ref+":tags/"+ref)
 			// local refs are needed so they would be advertised on next fetches. Force is used
 			// in case the ref is a branch and it now points to a different commit sha
 			// TODO: is there a better way to do this?
@@ -486,7 +486,7 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 		}
 	}()
 
-	subdir := path.Clean(gs.src.Subdir)
+	subdir := path.Join("/", gs.src.Subdir)
 	if subdir == "/" {
 		subdir = "."
 	}
@@ -526,7 +526,7 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 		} else {
 			pullref += ":" + pullref
 		}
-		_, err = gitWithinDir(ctx, checkoutDirGit, "", sock, knownHosts, gs.auth, "fetch", "-u", "--depth=1", "origin", pullref)
+		_, err = gitWithinDir(ctx, checkoutDirGit, "", sock, knownHosts, gs.auth, "fetch", "-u", "--depth=1", "--", "origin", pullref)
 		if err != nil {
 			return nil, err
 		}
@@ -559,6 +559,10 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 			return nil, errors.Wrapf(err, "failed to checkout remote %s", urlutil.RedactCredentials(gs.src.Remote))
 		}
 		if subdir != "." {
+			subdir = filepath.FromSlash(subdir)
+			if err := validateDirsOnly(cd, subdir); err != nil {
+				return nil, errors.Wrapf(err, "invalid subdir %v", subdir)
+			}
 			d, err := os.Open(filepath.Join(cd, subdir))
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to open subdir %v", subdir)
@@ -761,4 +765,28 @@ func (md cacheRefMetadata) setGitSnapshot(key string) error {
 
 func (md cacheRefMetadata) setGitRemote(key string) error {
 	return md.SetString(keyGitRemote, key, gitRemoteIndex+key)
+}
+
+// validateDirsOnly checks that each path component of subpath within root is a
+// real directory (not a symlink or file), preventing traversal and symlink escapes.
+// Note: uses os.Lstat per component which has a TOCTOU window; acceptable because
+// root is a BuildKit-controlled temp directory not writable by untrusted code.
+func validateDirsOnly(root string, subpath string) error {
+	rel := filepath.Clean(subpath)
+	rel = strings.TrimPrefix(rel, string(filepath.Separator))
+	if rel == "" || rel == "." {
+		return nil
+	}
+	p := ""
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		p = filepath.Join(p, part)
+		fi, err := os.Lstat(filepath.Join(root, p))
+		if err != nil {
+			return errors.Wrapf(err, "failed to lstat %q", p)
+		}
+		if !fi.IsDir() {
+			return errors.Errorf("git subpath %q contains non-directory %q", subpath, p)
+		}
+	}
+	return nil
 }

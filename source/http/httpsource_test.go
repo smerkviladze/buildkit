@@ -381,3 +381,35 @@ func newHTTPSource(t *testing.T) (source.Source, error) {
 		CacheAccessor: cm,
 	})
 }
+
+// TestSafeFileName_CVE_2026_33747 verifies that crafted filenames cannot
+// escape the snapshot directory (CVE-2026-33747).
+func TestSafeFileName_CVE_2026_33747(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{input: "../../../etc/passwd", expected: "passwd"},
+		{input: "../../shadow", expected: "shadow"},
+		{input: "../evil", expected: "evil"},
+		{input: "sub/dir/file.txt", expected: "file.txt"},
+		{input: "/absolute/path", expected: "path"},
+		{input: ".", expected: "download"},
+		{input: "..", expected: "download"},
+		{input: "", expected: "download"},
+		{input: "file\x00name", expected: "download"},
+		{input: "file\x01name", expected: "download"},
+		{input: "archive.tar.gz", expected: "archive.tar.gz"},
+		{input: "my-file_v2.bin", expected: "my-file_v2.bin"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
+			got := safeFileName(tt.input)
+			require.Equal(t, tt.expected, got)
+		})
+	}
+}

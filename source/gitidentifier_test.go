@@ -118,3 +118,29 @@ func TestNewGitIdentifier(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateGitRef_CVE_2026_33748 verifies that refs starting with '-' are
+// rejected at identifier construction time (CVE-2026-33748 hardening).
+func TestValidateGitRef_CVE_2026_33748(t *testing.T) {
+	t.Parallel()
+
+	rejectCases := []string{"-u", "--upload-pack=evil", "-"}
+	for _, ref := range rejectCases {
+		ref := ref
+		t.Run(ref, func(t *testing.T) {
+			t.Parallel()
+			_, err := NewGitIdentifier("https://github.com/foo/bar.git#" + ref)
+			require.Error(t, err, "expected error for ref %q", ref)
+		})
+	}
+
+	acceptCases := []string{"main", "v1.0.0", "abc123def", "feature/my-branch"}
+	for _, ref := range acceptCases {
+		ref := ref
+		t.Run(ref, func(t *testing.T) {
+			t.Parallel()
+			_, err := NewGitIdentifier("https://github.com/foo/bar.git#" + ref)
+			require.NoError(t, err, "expected no error for ref %q", ref)
+		})
+	}
+}

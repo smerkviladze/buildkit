@@ -214,6 +214,9 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 	if id == "" {
 		id = identity.NewID()
 	}
+	if err := executor.ValidContainerID(id); err != nil {
+		return nil, err
+	}
 	bundle := filepath.Join(w.root, id)
 
 	if err := os.Mkdir(bundle, 0o711); err != nil {
